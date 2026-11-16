@@ -1,13 +1,12 @@
 
-
 import ctypes
 import os
 import time
 
-from Crypto.Cipher import DES as StandardDES          # thư viện chuẩn, chỉ để kiểm thử
+from Crypto.Cipher import DES as StandardDES          # thư viện chuẩn, để kiểm thử
 from Crypto.Util.Padding import pad, unpad
 
-# ================= 1. NẠP THƯ VIỆN C =================
+#  1. Nạp thư viện C
 
 # Thư mục core nằm cạnh thư mục gui
 this_folder = os.path.dirname(os.path.abspath(__file__))
@@ -20,9 +19,7 @@ else:                                                   # Linux, macOS
 
 cipher = ctypes.CDLL(os.path.abspath(library_path))
 
-# Khai báo lại 2 struct TDRound, TDTrace của cipher.h để Python đọc được các bước trung gian.
-# Các trường phải đúng thứ tự và đúng kiểu như trong C (ở đây đều là uint8_t = c_uint8).
-# Tên trường có thể khác C: "in" là từ khóa của Python nên đổi thành "input".
+# Khai báo các struct của cipher.h để Python đọc được các bước trung gian.
 class TDRound(ctypes.Structure):
     _fields_ = [("KL", ctypes.c_uint8), ("KR", ctypes.c_uint8),     # 2 nửa khóa của vòng (4 bit)
                 ("Ki", ctypes.c_uint8),                             # khóa con (6 bit)
@@ -39,7 +36,6 @@ class TDTrace(ctypes.Structure):
                 ("r", TDRound * 3)]                                 # 3 vòng
 
 
-# ctypes cần biết kiểu dữ liệu của tham số và giá trị trả về của mỗi hàm C.
 #   c_uint8  : số 8 bit (uint8_t)      c_int    : số nguyên (int)
 #   c_uint64 : số 64 bit (uint64_t)    c_char_p : mảng byte (uint8_t*)
 #   c_void_p : con trỏ bất kỳ          POINTER(TDTrace): con trỏ tới struct TDTrace
@@ -57,50 +53,44 @@ cipher.des_bruteforce.argtypes = [ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uin
 cipher.des_bruteforce.restype = ctypes.c_int
 
 
-# ================= 2. HÀM PHỤ =================
+# 2. Hàm phụ 
 
-def remove_spaces(text):
-    """Bỏ mọi khoảng trắng: '5C 9A' -> '5C9A'"""
+def remove_spaces(text):  #Bỏ mọi khoảng trắng 
     return text.replace(" ", "")
 
-
+# Kiểm tra chuỗi chỉ gồm ký tự hex 0-9, A-F (hoặc a-f)
 def is_hex(text):
-    """Kiểm tra chuỗi chỉ gồm ký tự hex 0-9, A-F (hoặc a-f)."""
     for character in text:
         if character not in "0123456789ABCDEFabcdef":
             return False
     return True
 
-
+# Viết số dạng hex in hoa, đủ digits chữ số: number_to_hex(146, 4) -> '0092
 def number_to_hex(number, digits):
-    """Viết số dạng hex in hoa, đủ digits chữ số: number_to_hex(146, 4) -> '0092'"""
     text = hex(number)                  # hex(146) = '0x92'
     text = text[2:].upper()             # bỏ '0x' ở đầu -> '92'
     while len(text) < digits:           # thêm số 0 bên trái cho đủ độ dài
         text = "0" + text
     return text
 
-
+#Viết số dạng nhị phân đủ width bit
 def binary(number, width):
-    """Viết số dạng nhị phân đủ width bit: binary(5, 4) -> '0101'"""
-    text = bin(number)[2:]              # bin(5) = '0b101' -> bỏ '0b' -> '101'
+    text = bin(number)[2:]              # bỏ '0b'
     while len(text) < width:
         text = "0" + text
     return text
 
 
-def milliseconds_since(start):
-    """Số mili giây đã trôi qua kể từ thời điểm start."""
-    return (time.perf_counter() - start) * 1000
+def milliseconds_since(start):      
+    return (time.perf_counter() - start) * 1000     # Số ms đã trôi qua kể từ thời điểm start.
 
 
-# ================= 3. TINYDES =================
+# 3. Tinydes
 
 def read_tinydes_block(text, name):
-    """Đọc khối / khóa TinyDES: 8 ký tự 0/1 (vd 01011100) hoặc 2 ký tự hex (vd 5C).
+    #Đọc khối / khóa TinyDES: 8 ký tự 0/1  hoặc 2 ký tự hex .
+    #Trả về (số 8 bit, error).
 
-    Trả về (số 8 bit, error).
-    """
     text = remove_spaces(text)
     if len(text) == 8 and text.count("0") + text.count("1") == 8:
         return int(text, 2), None                   # đọc theo cơ số 2
@@ -110,11 +100,10 @@ def read_tinydes_block(text, name):
 
 
 def tinydes_run(block_text, key_text, decrypt):
-    """Mã hóa (decrypt = 0) hoặc giải mã (decrypt = 1) một khối TinyDES.
-
-    Hàm C td_run ghi mọi bước trung gian vào struct trace.
-    Trả về (trace, milliseconds, error).
-    """
+    #Mã hóa (decrypt = 0) , giải mã (decrypt = 1) một khối TinyDES.
+    #Hàm C td_run ghi mọi bước trung gian vào struct trace.
+    #Trả về (trace, milliseconds, error).
+    
     block, error = read_tinydes_block(block_text, "Khối vào")
     if error:
         return None, 0, error
@@ -124,13 +113,12 @@ def tinydes_run(block_text, key_text, decrypt):
 
     trace = TDTrace()                               # struct rỗng để C ghi vào
     start = time.perf_counter()
-    cipher.td_run(block, key, decrypt, ctypes.byref(trace))     # byref: truyền địa chỉ của trace
+    cipher.td_run(block, key, decrypt, ctypes.byref(trace))     # truyền địa chỉ của trace
     milliseconds = milliseconds_since(start)
     return trace, milliseconds, None
 
 
-def tinydes_steps(trace, decrypt):
-  
+def tinydes_steps(trace, decrypt):               # Đổi các bước trong trace thành chuỗi nhiều dòng
     text = ""
     if decrypt == 0:
         text += "P = " + binary(trace.input, 8) + " (" + number_to_hex(trace.input, 2) + ")"
@@ -185,10 +173,9 @@ def tinydes_steps(trace, decrypt):
 
 
 def tinydes_bruteforce(plaintext_text, ciphertext_text):
-    """Thử cả 256 khóa TinyDES, giữ các khóa thỏa TinyDES(P, K) = C.
+    #Thử cả 256 khóa TinyDES, giữ các khóa thỏa TinyDES(P, K) = C
+    #Trả về (danh sách khóa hex tìm được, error)
 
-    Trả về (danh sách khóa hex tìm được, error).
-    """
     plaintext, error = read_tinydes_block(plaintext_text, "Bản rõ")
     if error:
         return None, error
@@ -203,14 +190,13 @@ def tinydes_bruteforce(plaintext_text, ciphertext_text):
     return found_keys, None
 
 
-# ================= 4. DES: MÃ HÓA VĂN BẢN / TỆP =================
+# 4. DES : mã hóa văn bản , tệp
 
 def read_des_key(key_text, key_type):
-    """Đổi khóa người dùng nhập thành 8 byte. Trả về (key_bytes, error).
-
-    key_type = "hex" : khóa là 16 ký tự hex, vd 133457799BBCDFF1
-    key_type = "text": khóa là 8 ký tự chữ, vd matkhau1
-    """
+    #Đổi khóa người dùng nhập thành 8 byte. Trả về (key_bytes, error).
+    #key_type = "hex" : khóa là 16 ký tự hex
+    #key_type = "text": khóa là 8 ký tự chữ(nên là không dấu )
+    
     if key_type == "hex":
         key_hex = remove_spaces(key_text)
         if len(key_hex) != 16 or not is_hex(key_hex):
@@ -234,7 +220,7 @@ def group_des(data, key_bytes, decrypt):
 
 
 def standard_des(data, key_bytes, decrypt):
-    """Giống group_des nhưng dùng thư viện chuẩn PyCryptodome (ECB + đệm PKCS#7)."""
+    #dùng thư viện chuẩn PyCryptodome (ECB + đệm PKCS#7)
     standard_cipher = StandardDES.new(key_bytes, StandardDES.MODE_ECB)
     if decrypt == 0:
         return standard_cipher.encrypt(pad(data, 8))
@@ -242,17 +228,15 @@ def standard_des(data, key_bytes, decrypt):
     decrypted = standard_cipher.decrypt(data)
     try:
         return unpad(decrypted, 8)
-    except ValueError:                  # đệm PKCS#7 sai, thường do sai khóa
+    except ValueError:                  # đệm PKCS#7 sai
         return None
 
 
 def des_text(data, key_bytes, decrypt, use_standard):
-    """Mã hóa / giải mã dữ liệu dài (văn bản hoặc tệp).
-
-    data        : các byte cần xử lý. Khi giải mã, data là chuỗi hex bản mã.
-    use_standard: False = thuật toán của nhóm, True = thư viện chuẩn.
-    Trả về (result, error); result có "output", "blocks", "milliseconds".
-    """
+    #Mã hóa / giải mã dữ liệu dài (văn bản hoặc tệp).
+    #data: các byte cần xử lý. Khi giải mã, data là chuỗi hex bản mã.
+    #use_standard: False = thuật toán nhóm, True = thư viện chuẩn.
+    #Trả về (result, error); result có "output", "blocks", "milliseconds".
     if len(data) == 0:
         return None, "Chưa có dữ liệu: hãy gõ văn bản hoặc chọn tệp .txt."
 
@@ -284,10 +268,11 @@ def des_text(data, key_bytes, decrypt, use_standard):
     return result, None
 
 
-# ================= 5. KIỂM THỬ 1 KHỐI BẰNG THƯ VIỆN CHUẨN =================
+# 5. Kiểm thử 1 khối bằng thư viện chuẩn 
 
 def standard_one_block(plaintext_text, key_text):
-    """Mã hóa đúng 1 khối 64 bít bằng thư viện chuẩn (không đệm). Trả về (bản mã hex, error)."""
+    #    """Mã hóa đúng 1 khối 64 bít bằng thư viện chuẩn (không đệm). Trả về (bản mã hex, error)."""
+
     plaintext_hex = remove_spaces(plaintext_text)
     key_hex = remove_spaces(key_text)
     if len(plaintext_hex) != 16 or len(key_hex) != 16 or not is_hex(plaintext_hex + key_hex):
@@ -298,7 +283,22 @@ def standard_one_block(plaintext_text, key_text):
     return ciphertext.hex().upper(), None
 
 
-# ================= 6. VÉT CẠN DES RÚT GỌN =================
+def group_one_block(block_text, key_text, decrypt):
+    #Mã hóa (decrypt = 0) / giải mã (decrypt = 1) đúng 1 khối 64 bít bằng hàm des_run của nhóm (C).
+    #Không đệm, dùng để đối chiếu. Trả về (khối kết quả dạng hex, error).
+    
+    block_hex = remove_spaces(block_text)
+    key_hex = remove_spaces(key_text)
+    if len(block_hex) != 16 or len(key_hex) != 16 or not is_hex(block_hex + key_hex):
+        return None, "Khối vào và khóa cần đúng 16 ký tự hex (0-9, A-F)."
+
+    block = int(block_hex, 16)          # đổi chuỗi hex thành số
+    key = int(key_hex, 16)
+    output = cipher.des_run(block, key, decrypt, None)
+    return number_to_hex(output, 16), None
+
+
+# 6. Vét cạn DES rút gọn
 
 def key_with_unknown_bits(key, unknown_bits):
     """Viết khóa 64 bit dạng nhị phân theo từng byte, thay N bit hiệu dụng cuối bằng '?'.
